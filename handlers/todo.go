@@ -46,7 +46,6 @@ func CreateTodo(w http.ResponseWriter, r *http.Request) {
 
 	// Generate a new UUID for the Todo item
 	todo.ID = uuid.New()
-	fmt.Println("Generated UUID for todo:", todo.ID) // Debugging: Log the generated UUID
 
 	// Convert DueDate to string (YYYY-MM-DD) format
 	dueDateStr := todo.DueDate.Format("2006-01-02")
@@ -62,12 +61,13 @@ func CreateTodo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fmt.Println("Final inserted UUID in database:", todo.ID) // Debugging: Log the returned UUID
+	
 
 	// Log the action with the correct UUID
 	LogAction("create", todo.ID, "Todo created", "Creation of new todo item")
 
 	// Respond with created todo
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(todo)
 }
@@ -274,6 +274,7 @@ func GetTodoByID(w http.ResponseWriter, r *http.Request) {
 				"status":  status,
 				"message": "Todo not found",
 			}
+			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(status)
 			json.NewEncoder(w).Encode(response)
 
@@ -285,6 +286,7 @@ func GetTodoByID(w http.ResponseWriter, r *http.Request) {
 				"message": "Failed to fetch todo",
 				"error":   err.Error(),
 			}
+			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(status)
 			json.NewEncoder(w).Encode(response)
 
@@ -300,6 +302,7 @@ func GetTodoByID(w http.ResponseWriter, r *http.Request) {
 		"message": "Todo fetched successfully",
 		"data":    todo,
 	}
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(response)
 
@@ -339,7 +342,7 @@ err := db.QueryRow(prevQuery, id).Scan(&prevTodo.ID, &prevTodo.Title, &prevTodo.
 		http.Error(w, "Invalid request payload", http.StatusBadRequest)
 		return
 	}
-	log.Printf("[DEBUG] Parsed JSON Body: %+v\n", newTodo)
+	
 
 	// Step 3: Prepare the update query dynamically
 	query := "UPDATE todos SET "
@@ -396,7 +399,7 @@ err := db.QueryRow(prevQuery, id).Scan(&prevTodo.ID, &prevTodo.Title, &prevTodo.
 	)
 	LogAction("update", updatedTodo.ID, "Todo updated successfully", logMessage)
 
-	log.Printf("[INFO] Todo ID: %s updated successfully.\n", updatedTodo.ID)
+	
 
 	// Step 6: Return the response including both previous and updated values
 	response := map[string]interface{}{
@@ -404,11 +407,10 @@ err := db.QueryRow(prevQuery, id).Scan(&prevTodo.ID, &prevTodo.Title, &prevTodo.
 		"previous": prevTodo,
 		"updated":  updatedTodo,
 	}
-
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
 }
-
 
 
 func DeleteTodo(w http.ResponseWriter, r *http.Request) {
@@ -431,23 +433,25 @@ func DeleteTodo(w http.ResponseWriter, r *http.Request) {
 			"status":  "error",
 			"message": "Invalid ID format",
 		}
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(response)
 		LogAction("delete", uuid.Nil, "Invalid ID format", "Failed to delete todo: Invalid UUID format")
 		return
 	}
 
-	// Fetch the todo details before deleting
+	// Fetch the todo details before deleting, including the is_deleted status
 	var todo struct {
 		ID          uuid.UUID `json:"id"`
 		Title       string    `json:"title"`
 		Description string    `json:"description"`
 		Status      string    `json:"status"`
 		DueDate     time.Time `json:"due_date"`
+		IsDeleted   bool      `json:"is_deleted"`
 	}
 
-	err = db.QueryRow("SELECT id, title, description, status, due_date FROM todos WHERE id = $1 AND is_deleted = FALSE", id).
-		Scan(&todo.ID, &todo.Title, &todo.Description, &todo.Status, &todo.DueDate)
+	query := "SELECT id, title, description, status, due_date, is_deleted FROM todos WHERE id = $1"
+	err = db.QueryRow(query, id).Scan(&todo.ID, &todo.Title, &todo.Description, &todo.Status, &todo.DueDate, &todo.IsDeleted)
 
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -455,6 +459,7 @@ func DeleteTodo(w http.ResponseWriter, r *http.Request) {
 				"status":  "error",
 				"message": "Todo not found or already deleted",
 			}
+			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusNotFound)
 			json.NewEncoder(w).Encode(response)
 			LogAction("delete", id, "Todo not found", "Failed to delete todo: Already deleted or does not exist")
@@ -465,14 +470,28 @@ func DeleteTodo(w http.ResponseWriter, r *http.Request) {
 			"status":  "error",
 			"message": "Database error",
 		}
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(response)
-		// LogAction("delete", id, "Database error", fmt.Sprintf("Failed to fetch todo: %v", err))
+		return
+	}
+
+	// If the todo is already marked as deleted, return a conflict response
+	if todo.IsDeleted {
+		response := map[string]interface{}{
+			"status":  "error",
+			"message": "Todo is already deleted",
+			"todo":    todo, // Include the existing todo data for verification
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict) // 409 Conflict
+		json.NewEncoder(w).Encode(response)
+		LogAction("delete", id, "Todo already deleted", fmt.Sprintf("Todo ID: %s is already marked as deleted", id))
 		return
 	}
 
 	// Perform a soft delete
-	query := "UPDATE todos SET is_deleted = TRUE WHERE id = $1"
+	query = "UPDATE todos SET is_deleted = TRUE WHERE id = $1"
 	_, err = db.Exec(query, id)
 	if err != nil {
 		response := map[string]interface{}{
@@ -481,7 +500,6 @@ func DeleteTodo(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(response)
-		// LogAction("delete", id, "Failed to delete", fmt.Sprintf("Error executing delete query: %v", err))
 		return
 	}
 
@@ -493,6 +511,7 @@ func DeleteTodo(w http.ResponseWriter, r *http.Request) {
 		"message": "Todo deleted successfully",
 		"todo":    todo,
 	}
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
 }

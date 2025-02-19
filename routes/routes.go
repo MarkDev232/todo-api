@@ -12,7 +12,6 @@ func SetupRoutes() *http.ServeMux {
 	mux.HandleFunc("/todo", handlers.GetTodoByID)
 	mux.HandleFunc("/todo/create", handlers.CreateTodo)
 	mux.HandleFunc("/todoss",handlers.GetTodosWithFilterSortPagination)
-	
 	mux.HandleFunc("/update-todo", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPut {
 			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
