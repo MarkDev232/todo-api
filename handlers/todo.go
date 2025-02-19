@@ -467,7 +467,7 @@ func DeleteTodo(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(response)
-		LogAction("delete", id, "Database error", fmt.Sprintf("Failed to fetch todo: %v", err))
+		// LogAction("delete", id, "Database error", fmt.Sprintf("Failed to fetch todo: %v", err))
 		return
 	}
 
@@ -481,7 +481,7 @@ func DeleteTodo(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(response)
-		LogAction("delete", id, "Failed to delete", fmt.Sprintf("Error executing delete query: %v", err))
+		// LogAction("delete", id, "Failed to delete", fmt.Sprintf("Error executing delete query: %v", err))
 		return
 	}
 
