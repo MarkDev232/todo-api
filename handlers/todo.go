@@ -232,103 +232,184 @@ func GetTodosWithFilterSortPagination(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
-
 // GetTodoByID retrieves a specific todo by ID
 func GetTodoByID(w http.ResponseWriter, r *http.Request) {
 	idStr := r.URL.Query().Get("id")
 	if idStr == "" {
-		http.Error(w, "Missing ID parameter", http.StatusBadRequest)
-		LogAction("fetch", uuid.Nil, "Missing ID parameter", "Missing ID in the request") // Log missing ID
+		status := http.StatusBadRequest
+		response := map[string]interface{}{
+			"status":  status,
+			"message": "Missing ID parameter",
+		}
+		w.WriteHeader(status)
+		json.NewEncoder(w).Encode(response)
+
+		LogAction("fetch", uuid.Nil, "Missing ID parameter", fmt.Sprintf("Status: %d - Missing ID in the request", status))
 		return
 	}
 
 	// Parse the ID into a UUID
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "Invalid ID format", http.StatusBadRequest)
-		LogAction("fetch", uuid.Nil, "Invalid ID format", "Invalid UUID format for ID") // Log invalid format
+		status := http.StatusBadRequest
+		response := map[string]interface{}{
+			"status":  status,
+			"message": "Invalid ID format",
+		}
+		w.WriteHeader(status)
+		json.NewEncoder(w).Encode(response)
+
+		LogAction("fetch", uuid.Nil, "Invalid ID format", fmt.Sprintf("Status: %d - Invalid UUID format", status))
 		return
 	}
 
 	var todo models.Todo
-	query := "SELECT id, title, description, status, due_date, created_at, is_deleted FROM todos WHERE id = $1 AND is_deleted = FALSE"
+	query := "SELECT id, title, description, status, due_date, created_at, is_deleted FROM todos WHERE id = $1 AND is_deleted = false"
 	err = db.QueryRow(query, id).Scan(&todo.ID, &todo.Title, &todo.Description, &todo.Status, &todo.DueDate, &todo.CreatedAt, &todo.IsDeleted)
+
 	if err != nil {
 		if err == sql.ErrNoRows {
-			http.Error(w, "Todo not found", http.StatusNotFound)
-			LogAction("fetch", id, "Todo not found", "Todo with the given ID does not exist") // Log not found
+			status := http.StatusNotFound
+			response := map[string]interface{}{
+				"status":  status,
+				"message": "Todo not found",
+			}
+			w.WriteHeader(status)
+			json.NewEncoder(w).Encode(response)
+
+			LogAction("fetch", id, "Todo not found", fmt.Sprintf("Status: %d - Todo with the given ID does not exist", status))
 		} else {
-			http.Error(w, "Failed to fetch todo", http.StatusInternalServerError)
-			LogAction("fetch", id, "Failed to fetch todo", fmt.Sprintf("Error: %v", err)) // Log failure to fetch
+			status := http.StatusInternalServerError
+			response := map[string]interface{}{
+				"status":  status,
+				"message": "Failed to fetch todo",
+				"error":   err.Error(),
+			}
+			w.WriteHeader(status)
+			json.NewEncoder(w).Encode(response)
+
+			LogAction("fetch", id, "Failed to fetch todo", fmt.Sprintf("Status: %d - Error: %v", status, err))
 		}
 		return
 	}
 
-	// Log action after fetching todo successfully
-	LogAction("fetch", todo.ID, "Todo fetched successfully", fmt.Sprintf("Todo: %v", todo.Title)) // Log successful fetch
-	json.NewEncoder(w).Encode(todo)
-}
+	// Successful response
+	status := http.StatusOK
+	response := map[string]interface{}{
+		"status":  status,
+		"message": "Todo fetched successfully",
+		"data":    todo,
+	}
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(response)
 
-// Update Todo
+	LogAction("fetch", todo.ID, "Todo fetched successfully", fmt.Sprintf("Status: %d - Todo: %v", status, todo.Title))
+}
+// UpdateTodo updates a todo item and logs both previous and updated values.
 func UpdateTodo(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
 	if id == "" {
+		log.Println("[ERROR] Missing todo ID")
 		http.Error(w, "Missing todo ID", http.StatusBadRequest)
 		return
 	}
 
-	var todo models.Todo
-	if err := json.NewDecoder(r.Body).Decode(&todo); err != nil {
-		http.Error(w, "Invalid request payload" , http.StatusBadRequest)
+	log.Printf("[INFO] Received PUT request to update Todo ID: %s\n", id)
+
+	// Step 1: Fetch previous todo details before updating
+	var prevTodo models.Todo
+	prevQuery := "SELECT id, title, description, status, due_date FROM todos WHERE id = $1"
+err := db.QueryRow(prevQuery, id).Scan(&prevTodo.ID, &prevTodo.Title, &prevTodo.Description, &prevTodo.Status, &prevTodo.DueDate)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			log.Printf("[WARN] Todo ID: %s not found\n", id)
+			http.Error(w, "Todo not found", http.StatusNotFound)
+		} else {
+			log.Printf("[ERROR] Failed to fetch previous todo data: %v\n", err)
+			http.Error(w, "Failed to fetch previous todo data", http.StatusInternalServerError)
+		}
 		return
 	}
 
+	// Step 2: Decode the new update request
+	var newTodo models.Todo
+	if err := json.NewDecoder(r.Body).Decode(&newTodo); err != nil {
+		log.Printf("[ERROR] Invalid request payload: %v\n", err)
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+	log.Printf("[DEBUG] Parsed JSON Body: %+v\n", newTodo)
+
+	// Step 3: Prepare the update query dynamically
 	query := "UPDATE todos SET "
 	var values []interface{}
 	var setClauses []string
 	paramIndex := 1
 
-	if todo.Title != "" {
+	if newTodo.Title != "" {
 		setClauses = append(setClauses, fmt.Sprintf("title=$%d", paramIndex))
-		values = append(values, todo.Title)
+		values = append(values, newTodo.Title)
 		paramIndex++
 	}
-	if todo.Description != "" {
+	if newTodo.Description != "" {
 		setClauses = append(setClauses, fmt.Sprintf("description=$%d", paramIndex))
-		values = append(values, todo.Description)
+		values = append(values, newTodo.Description)
 		paramIndex++
 	}
-	if todo.Status != "" {
+	if newTodo.Status != "" {
 		setClauses = append(setClauses, fmt.Sprintf("status=$%d", paramIndex))
-		values = append(values, todo.Status)
+		values = append(values, newTodo.Status)
 		paramIndex++
 	}
 
 	if len(setClauses) == 0 {
+		log.Println("[WARN] No fields provided for update")
 		http.Error(w, "No fields to update", http.StatusBadRequest)
 		return
 	}
+	if !newTodo.DueDate.IsZero() { // Correct way to check if DueDate is set
+		setClauses = append(setClauses, fmt.Sprintf("due_date=$%d", paramIndex))
+		values = append(values, newTodo.DueDate)
+		paramIndex++
+	}
+	
+	
 
-	query += strings.Join(setClauses, ", ") + fmt.Sprintf(" WHERE id=$%d", paramIndex)
+	query += strings.Join(setClauses, ", ") + fmt.Sprintf(" WHERE id=$%d RETURNING id, title, description, status, due_date", paramIndex)
 	values = append(values, id)
-	fmt.Println(values)
-	res, err := db.Exec(query, values...)
+
+	// Step 4: Execute the update query and fetch new data
+	var updatedTodo models.Todo
+	err = db.QueryRow(query, values...).Scan(&updatedTodo.ID, &updatedTodo.Title, &updatedTodo.Description, &updatedTodo.Status, &updatedTodo.DueDate)
 	if err != nil {
+		log.Printf("[ERROR] Failed to update todo: %v\n", err)
 		http.Error(w, "Failed to update todo", http.StatusInternalServerError)
 		return
 	}
 
-	rowsAffected, err := res.RowsAffected()
-	if err != nil {
-		fmt.Println("Error checking affected rows:", err)
-		http.Error(w, "Error checking affected rows", http.StatusInternalServerError)
-		return
+	// Step 5: Log the update action with both previous and new data
+	logMessage := fmt.Sprintf(
+		"Todo Updated: [Prev] Title: %s, Description: %s, Status: %s → [New] Title: %s, Description: %s, Status: %s",
+		prevTodo.Title, prevTodo.Description, prevTodo.Status,
+		updatedTodo.Title, updatedTodo.Description, updatedTodo.Status,
+	)
+	LogAction("update", updatedTodo.ID, "Todo updated successfully", logMessage)
+
+	log.Printf("[INFO] Todo ID: %s updated successfully.\n", updatedTodo.ID)
+
+	// Step 6: Return the response including both previous and updated values
+	response := map[string]interface{}{
+		"message":  "Todo updated successfully",
+		"previous": prevTodo,
+		"updated":  updatedTodo,
 	}
-	fmt.Println("Rows Affected:", rowsAffected)
 
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"message": "Todo updated successfully"})
+	json.NewEncoder(w).Encode(response)
 }
+
+
 
 func DeleteTodo(w http.ResponseWriter, r *http.Request) {
 	idStr := r.URL.Query().Get("id")
