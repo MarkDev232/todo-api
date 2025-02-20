@@ -33,6 +33,7 @@ func LogAction(action string, todoID uuid.UUID, details string, message string) 
 		log.Printf("Failed to log action: %v", err)
 	}
 }
+
 func CreateTodo(w http.ResponseWriter, r *http.Request) {
 	var todo models.Todo
 
@@ -317,12 +318,12 @@ func UpdateTodo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("[INFO] Received PUT request to update Todo ID: %s\n", id)
+
 
 	// Step 1: Fetch previous todo details before updating
 	var prevTodo models.Todo
-	prevQuery := "SELECT id, title, description, status, due_date FROM todos WHERE id = $1"
-err := db.QueryRow(prevQuery, id).Scan(&prevTodo.ID, &prevTodo.Title, &prevTodo.Description, &prevTodo.Status, &prevTodo.DueDate)
+	prevQuery := "SELECT id, title, description, status, due_date, is_deleted FROM todos WHERE id = $1"
+	err := db.QueryRow(prevQuery, id).Scan(&prevTodo.ID, &prevTodo.Title, &prevTodo.Description, &prevTodo.Status, &prevTodo.DueDate, &prevTodo.IsDeleted)
 
 	if err != nil {
 		if err == sql.ErrNoRows {
