@@ -75,7 +75,7 @@ func CreateTodo(w http.ResponseWriter, r *http.Request) {
 
 func GetTodos(w http.ResponseWriter, r *http.Request) {
 	// Fetch all todos without filtering or pagination
-	rows, err := db.Query("SELECT id, title, status,due_date,description FROM todos WHERE is_deleted = FALSE")
+	rows, err := db.Query("SELECT id, title, status,due_date,description FROM todos")
 	if err != nil {
 		http.Error(w, "Unable to fetch todos", http.StatusInternalServerError)
 		return
@@ -121,7 +121,6 @@ func GetTodos(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK) // Set the status code to 200 OK
 	json.NewEncoder(w).Encode(response)
 }
-
 // GetTodosWithFilterSortPagination retrieves todos with filtering, sorting, and pagination
 func GetTodosWithFilterSortPagination(w http.ResponseWriter, r *http.Request) {
 	// Extract query parameters
@@ -141,6 +140,7 @@ func GetTodosWithFilterSortPagination(w http.ResponseWriter, r *http.Request) {
 	dueDate := queryParams.Get("due_date")
 	sortBy := queryParams.Get("sort_by")
 	sortOrder := queryParams.Get("sort_order")
+	isDeletedParam := queryParams.Get("is_deleted")
 
 	// Validate sorting parameters
 	allowedSortFields := map[string]bool{"id": true, "title": true, "status": true, "due_date": true, "created_at": true}
@@ -154,9 +154,20 @@ func GetTodosWithFilterSortPagination(w http.ResponseWriter, r *http.Request) {
 	offset := (page - 1) * limit
 
 	// **Prepare SQL Query with placeholders**
-	query := "SELECT id, title, description, status, due_date, created_at, is_deleted FROM todos WHERE is_deleted = false"
+	query := "SELECT id, title, description, status, due_date, created_at, is_deleted FROM todos WHERE 1=1"
 	args := []interface{}{}
 	argIndex := 1
+
+	// Handle is_deleted filter
+	if isDeletedParam != "" {
+		isDeleted, err := strconv.ParseBool(isDeletedParam)
+		if err == nil {
+			query += fmt.Sprintf(" AND is_deleted = $%d", argIndex)
+			args = append(args, isDeleted)
+			argIndex++
+			
+		}
+	}
 
 	if status != "" {
 		query += fmt.Sprintf(" AND status = $%d", argIndex)
@@ -195,9 +206,19 @@ func GetTodosWithFilterSortPagination(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// **Count total todos for pagination**
-	countQuery := "SELECT COUNT(*) FROM todos WHERE is_deleted = false"
+	countQuery := "SELECT COUNT(*) FROM todos WHERE 1=1"
 	countArgs := []interface{}{}
 	countIndex := 1
+
+	// Apply the same is_deleted filter for counting
+	if isDeletedParam != "" {
+		isDeleted, err := strconv.ParseBool(isDeletedParam)
+		if err == nil {
+			countQuery += fmt.Sprintf(" AND is_deleted = $%d", countIndex)
+			countArgs = append(countArgs, isDeleted)
+			countIndex++
+		}
+	}
 
 	if status != "" {
 		countQuery += fmt.Sprintf(" AND status = $%d", countIndex)
@@ -229,10 +250,11 @@ func GetTodosWithFilterSortPagination(w http.ResponseWriter, r *http.Request) {
 		"total_todos":  totalTodos,
 	}
 
-	// **Set Response Headers and Send Response**
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
+
 // GetTodoByID retrieves a specific todo by ID
 func GetTodoByID(w http.ResponseWriter, r *http.Request) {
 	idStr := r.URL.Query().Get("id")
