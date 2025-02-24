@@ -21,6 +21,7 @@ func SetupRoutes() *http.ServeMux {
 	})
 
 	mux.HandleFunc("/todo/delete/", handlers.DeleteTodo)
+	mux.HandleFunc("/todo/logs", handlers.GetAllLogs)
 
 	return mux
 }

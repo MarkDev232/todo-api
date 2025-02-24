@@ -235,6 +235,8 @@ func GetTodosWithFilterSortPagination(w http.ResponseWriter, r *http.Request) {
 	err = db.QueryRow(countQuery, countArgs...).Scan(&totalTodos)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Unable to count todos: %v", err), http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(http.Error)
 		return
 	}
 
@@ -536,5 +538,85 @@ func DeleteTodo(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(response)
+}
+
+func GetAllLogs(w http.ResponseWriter, r *http.Request) {
+	// Parse query parameters
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	action := r.URL.Query().Get("action") // Action filter
+
+	// Set defaults if not provided
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 {
+		limit = 10 // Default limit per page
+	}
+
+	offset := (page - 1) * limit // Calculate offset for pagination
+
+	// Query to get total records (with action filter)
+	var totalRecords int
+	countQuery := "SELECT COUNT(*) FROM logs WHERE 1=1"
+	logsQuery := "SELECT id, todo_id, action, timestamp FROM logs WHERE 1=1"
+
+	var args []interface{}
+	argIndex := 1
+
+	// Add action filter if provided
+	if action != "" {
+		countQuery += " AND action = $" + strconv.Itoa(argIndex)
+		logsQuery += " AND action = $" + strconv.Itoa(argIndex)
+		args = append(args, action)
+		argIndex++
+	}
+
+	// Finalize queries with pagination
+	countErr := db.QueryRow(countQuery, args...).Scan(&totalRecords)
+	if countErr != nil {
+		http.Error(w, "Failed to fetch total log count", http.StatusInternalServerError)
+		return
+	}
+
+	// Calculate total pages
+	totalPages := (totalRecords + limit - 1) / limit // Ensures rounding up
+
+	// Append ORDER BY, LIMIT, OFFSET
+	logsQuery += " ORDER BY timestamp DESC LIMIT $" + strconv.Itoa(argIndex) + " OFFSET $" + strconv.Itoa(argIndex+1)
+	args = append(args, limit, offset)
+
+	// Execute logs query
+	rows, err := db.Query(logsQuery, args...)
+	if err != nil {
+		http.Error(w, "Failed to fetch logs", http.StatusInternalServerError)
+		return
+	}
+	
+	defer rows.Close()
+
+	var logs []models.Log
+	for rows.Next() {
+		var log models.Log
+		if err := rows.Scan(&log.ID, &log.TodoID, &log.Action, &log.Timestamp); err != nil {
+			http.Error(w, "Error scanning log", http.StatusInternalServerError)
+			w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(http.StatusInternalServerError)
+			return
+		}
+		logs = append(logs, log)
+	}
+
+	// Response JSON structure
+	response := models.LogResponse{
+		CurrentPage:  page,
+		TotalRecords: totalRecords,
+		TotalPages:   totalPages,
+		Logs:         logs,
+	}
+
+	// JSON Response
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }

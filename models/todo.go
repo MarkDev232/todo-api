@@ -65,3 +65,16 @@ type Todo struct {
 	CreatedAt   time.Time  `json:"created_at"`
 	IsDeleted   bool       `json:"is_deleted"`
 }
+type Log struct {
+	ID        string    `json:"id"`
+	TodoID    string    `json:"todo_id"`
+	Action    string    `json:"action"`
+	Timestamp time.Time `json:"timestamp"`
+}
+// LogResponse struct to include metadata
+type LogResponse struct {
+	CurrentPage int          `json:"current_page"`
+	TotalRecords int         `json:"total_records"`
+	TotalPages  int          `json:"total_pages"`
+	Logs        []Log `json:"logs"`
+}
